@@ -1,18 +1,34 @@
-## YouTube Floating Player (Chrome Extension)
+# YouTube Floating Player
 
-Keeps the YouTube video fixed at the top of the screen so you can scroll through the description and comments without losing sight of the video.
+A Chrome extension that keeps the YouTube video player fixed at the top of your screen while you scroll — so you never lose sight of what you're watching.
 
-### How to load the extension in Chrome
+## Why?
 
-1. Open Chrome and go to `chrome://extensions`.
-2. Turn on **Developer mode** (top-right corner).
-3. Click **Load unpacked**.
-4. Select the `YouTube Floating` folder (this project directory).
-5. Open a YouTube video page (`https://www.youtube.com/watch?...`) and scroll down — the player should stay fixed at the top.
+- **Read lyrics** in the video description while the music plays
+- **Browse comments** without the video disappearing off-screen
+- **Watch and scroll** freely — the player stays pinned at the top
 
-### Notes
+When you scroll past the video, it locks to the top of the viewport and the YouTube top bar is hidden to give you maximum screen space. Scroll back up and everything returns to normal.
 
-- Works on standard YouTube watch pages (desktop).
-- Handles YouTube SPA navigation — the floating behavior re-initializes when navigating between videos.
-- The placeholder element preserves layout height so the page doesn't jump when the player becomes fixed.
-- If something stops working, check the DevTools console for messages prefixed with `[YT Floating Player]`.
+## Install (unpacked)
+
+1. Clone or download this repo
+2. Open `chrome://extensions` in Chrome
+3. Enable **Developer mode** (top-right toggle)
+4. Click **Load unpacked** and select this project folder
+5. Open any YouTube video and scroll down
+
+## How it works
+
+When you scroll past the video on a YouTube watch page, the extension:
+
+1. Pins the video player to the top of the viewport
+2. Hides the YouTube top bar so the video gets full width
+3. Inserts a placeholder to prevent the page from jumping
+4. Restores everything when you scroll back up
+
+The extension handles YouTube's SPA navigation, so it re-initializes automatically when you switch between videos.
+
+## Troubleshooting
+
+If something stops working, check the DevTools console for messages prefixed with `[YT Floating Player]`.
