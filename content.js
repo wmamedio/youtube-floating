@@ -4,13 +4,13 @@
 (() => {
   "use strict";
 
-  const FLOATING_CLASS = "ytfp-floating-enabled";
   const PLACEHOLDER_ID = "ytfp-player-placeholder";
-  const PLAYER_SELECTOR = "#movie_player";
+  const STYLE_ID = "ytfp-injected-styles";
 
   let scrollHandler = null;
-  let resizeObserver = null;
-  let currentPlayer = null;
+  let currentTarget = null;
+  let isFloating = false;
+  let navObserver = null;
 
   function log(...args) {
     console.log("[YT Floating Player]", ...args);
@@ -20,86 +20,168 @@
     return document.getElementById(PLACEHOLDER_ID);
   }
 
+  function injectStyles() {
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = STYLE_ID;
+    // We inject styles via JS so we can use !important and target dynamic elements.
+    // The key insight: we target #full-bleed-container (the outermost player wrapper)
+    // and neutralize stacking contexts on ALL ancestors up to <body>.
+    style.textContent = `
+      #ytfp-player-placeholder {
+        background: #000;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   function cleanup() {
     if (scrollHandler) {
       window.removeEventListener("scroll", scrollHandler);
       scrollHandler = null;
     }
 
-    if (resizeObserver) {
-      resizeObserver.disconnect();
-      resizeObserver = null;
-    }
-
-    document.documentElement.classList.remove(FLOATING_CLASS);
+    unfloat();
 
     const placeholder = getPlaceholder();
     if (placeholder) {
       placeholder.remove();
     }
 
-    currentPlayer = null;
+    currentTarget = null;
+    isFloating = false;
   }
 
-  function syncPlaceholderHeight(player, placeholder) {
-    const height = player.offsetHeight;
-    if (height > 0) {
-      placeholder.style.height = `${height}px`;
+  function neutralizeAncestors(el) {
+    let node = el.parentElement;
+    while (node && node !== document.documentElement) {
+      node.style.setProperty("contain", "none", "important");
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("will-change", "auto", "important");
+      node.style.setProperty("filter", "none", "important");
+      node.style.setProperty("perspective", "none", "important");
+      node.style.setProperty("clip-path", "none", "important");
+      node.style.setProperty("overflow", "visible", "important");
+      node = node.parentElement;
     }
   }
 
-  function createPlaceholder(player) {
+  function restoreAncestors(el) {
+    let node = el.parentElement;
+    while (node && node !== document.documentElement) {
+      node.style.removeProperty("contain");
+      node.style.removeProperty("transform");
+      node.style.removeProperty("will-change");
+      node.style.removeProperty("filter");
+      node.style.removeProperty("perspective");
+      node.style.removeProperty("clip-path");
+      node.style.removeProperty("overflow");
+      node = node.parentElement;
+    }
+  }
+
+  function floatTarget(target, height) {
+    if (isFloating) return;
+
+    // Create placeholder only when we actually float.
     let placeholder = getPlaceholder();
     if (!placeholder) {
       placeholder = document.createElement("div");
       placeholder.id = PLACEHOLDER_ID;
       placeholder.style.width = "100%";
-      player.parentNode.insertBefore(placeholder, player);
+      placeholder.style.background = "#000";
+      target.parentNode.insertBefore(placeholder, target);
     }
-    syncPlaceholderHeight(player, placeholder);
-    return placeholder;
+    placeholder.style.height = height + "px";
+
+    neutralizeAncestors(target);
+
+    target.style.setProperty("position", "fixed", "important");
+    target.style.setProperty("top", "0", "important");
+    target.style.setProperty("left", "0", "important");
+    target.style.setProperty("width", "100vw", "important");
+    target.style.setProperty("z-index", "2147483647", "important");
+    target.style.setProperty("background", "#000", "important");
+    target.style.setProperty("height", height + "px", "important");
+
+    // Hide the masthead so it doesn't compete.
+    const masthead = document.querySelector("#masthead-container");
+    if (masthead) {
+      masthead.style.setProperty("z-index", "0", "important");
+    }
+
+    isFloating = true;
   }
 
-  function setupFloating(player) {
-    const placeholder = createPlaceholder(player);
+  function unfloat() {
+    if (!isFloating || !currentTarget) return;
 
-    // Keep placeholder height in sync when the player resizes (e.g. theater mode toggle).
-    resizeObserver = new ResizeObserver(() => {
-      syncPlaceholderHeight(player, placeholder);
-    });
-    resizeObserver.observe(player);
+    restoreAncestors(currentTarget);
+
+    currentTarget.style.removeProperty("position");
+    currentTarget.style.removeProperty("top");
+    currentTarget.style.removeProperty("left");
+    currentTarget.style.removeProperty("width");
+    currentTarget.style.removeProperty("z-index");
+    currentTarget.style.removeProperty("background");
+    currentTarget.style.removeProperty("height");
+
+    const masthead = document.querySelector("#masthead-container");
+    if (masthead) {
+      masthead.style.removeProperty("z-index");
+    }
+
+    // Remove placeholder when unfloating.
+    const placeholder = getPlaceholder();
+    if (placeholder) {
+      placeholder.remove();
+    }
+
+    isFloating = false;
+  }
+
+  function setupFloating(target) {
+    const height = target.offsetHeight;
+    // Record the target's absolute Y position on the page at setup time.
+    const triggerY = target.getBoundingClientRect().top + window.scrollY;
 
     scrollHandler = () => {
-      const shouldFloat = placeholder.getBoundingClientRect().top < 0;
-
-      if (shouldFloat) {
-        document.documentElement.classList.add(FLOATING_CLASS);
+      if (!isFloating) {
+        // Float when the top of the target would scroll off-screen.
+        if (window.scrollY > triggerY) {
+          floatTarget(target, height);
+        }
       } else {
-        document.documentElement.classList.remove(FLOATING_CLASS);
+        // Unfloat when scrolling back above the trigger point.
+        // Use placeholder position if it exists.
+        const placeholder = getPlaceholder();
+        if (placeholder && placeholder.getBoundingClientRect().top >= 0) {
+          unfloat();
+        }
       }
     };
 
     window.addEventListener("scroll", scrollHandler, { passive: true });
-    scrollHandler(); // run once in case the page loads already scrolled
   }
 
   function init() {
-    if (!location.pathname.startsWith("/watch")) return;
+    if (!location.pathname.startsWith("/watch")) return false;
 
-    const player = document.querySelector(PLAYER_SELECTOR);
-    if (!player) return false;
+    // Target the outermost player container — fewer ancestors to neutralize.
+    const target = document.querySelector("#full-bleed-container");
+    if (!target) return false;
+    if (!target.offsetHeight) return false; // Not rendered yet.
 
-    // Already tracking this player — nothing to do.
-    if (currentPlayer === player) return true;
+    if (currentTarget === target) return true;
 
     cleanup();
-    currentPlayer = player;
+    currentTarget = target;
+    injectStyles();
     log("Floating enabled for", location.href);
-    setupFloating(player);
+    setupFloating(target);
     return true;
   }
 
-  // Retry until the player element appears in the DOM.
   function waitForPlayer() {
     const MAX_WAIT = 8000;
     const INTERVAL = 300;
@@ -107,35 +189,45 @@
 
     const timer = setInterval(() => {
       if (init() || Date.now() - start > MAX_WAIT) {
-        if (!currentPlayer) log("Timed out waiting for player.");
+        if (!currentTarget) log("Timed out waiting for player.");
         clearInterval(timer);
       }
     }, INTERVAL);
 
-    // Also try immediately.
     init();
   }
 
-  // YouTube is a SPA — detect navigation by watching the URL.
   function observeNavigation() {
     let lastUrl = location.href;
 
-    const observer = new MutationObserver(() => {
+    navObserver = new MutationObserver(() => {
       if (location.href === lastUrl) return;
       lastUrl = location.href;
 
       cleanup();
 
       if (location.pathname.startsWith("/watch")) {
-        // Small delay to let the new page render.
         setTimeout(waitForPlayer, 400);
       }
     });
 
-    observer.observe(document.body, { subtree: true, childList: true });
+    // Observe <title> changes instead of body to avoid conflicts
+    // with our own DOM mutations.
+    const title = document.querySelector("title");
+    if (title) {
+      navObserver.observe(title, { childList: true });
+    }
+    // Also observe yt-navigate-finish event which YouTube fires on SPA navigation.
+    window.addEventListener("yt-navigate-finish", () => {
+      if (location.href === lastUrl) return;
+      lastUrl = location.href;
+      cleanup();
+      if (location.pathname.startsWith("/watch")) {
+        setTimeout(waitForPlayer, 400);
+      }
+    });
   }
 
-  // Entry point.
   if (location.pathname.startsWith("/watch")) {
     waitForPlayer();
   }
